@@ -8,9 +8,9 @@ import time
 import statistics
 import pandas as pd
 from dotenv import load_dotenv
-
-load_dotenv()
-
+parent_dir = os.path.dirname(os.getcwd())
+env_path = os.path.join(parent_dir, '.env')
+load_dotenv(env_path)
 os.environ['OPENAI_API_KEY'] = os.getenv("MY_OPENAI_API_KEY")
 
 

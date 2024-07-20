@@ -4,21 +4,20 @@ import io
 import base64
 from PIL import Image
 import time
-import statistics
 import pandas as pd
 import google.generativeai as genai
-
 from dotenv import load_dotenv
-
-load_dotenv()
-
+parent_dir = os.path.dirname(os.getcwd())
+env_path = os.path.join(parent_dir, '.env')
+load_dotenv(env_path)
 os.environ['GOOGLE_API_KEY'] = os.getenv("MY_GOOGLE_API_KEY")
+
 
 class GeminiVisionAnalyzer:
     def __init__(self, api_key, time_file_name="Gemini_rephrased_execution_times.xlsx"):
         self.api_key = api_key
         self.execution_times = []
-        self.time_folder = 'time2'
+        self.time_folder = 'time'
         os.makedirs(self.time_folder, exist_ok=True) 
         self.time_file_name = os.path.join(self.time_folder, time_file_name)
         self.df_execution_times = self.load_or_initialize_execution_times()
@@ -96,6 +95,16 @@ class GeminiVisionAnalyzer:
                 print(f"Attempt {attempt + 1}: Image too large. Resizing...")
 
         raise ValueError("Unable to reduce image size within 5 attempts")
+    
+    def extract_json_from_response(self, response):
+        try:
+            start = response.index('{')
+            end = response.rindex('}') + 1
+            json_str = response[start:end]
+            return json.loads(json_str)
+        except (ValueError, json.JSONDecodeError):
+            print(f"Failed to extract JSON from response: {response}")
+            return None
 
     def analyze_images_with_gemini_vision(self, prompt_text, image_paths, temperature=0):
         generation_config = {"temperature": temperature}
@@ -124,7 +133,12 @@ class GeminiVisionAnalyzer:
                 if not response.text.strip():
                     continue
 
-                return response.text, execution_time
+                result = self.extract_json_from_response(response.text)
+                if result:
+                    return result, execution_time
+                else:
+                    print(f"Failed to extract JSON from response. Attempt {attempt + 1}")
+
             except Exception as e:
                 print(f"Error: API request failed - {str(e)}")
                 if "429" in str(e):
@@ -193,7 +207,7 @@ class GeminiVisionAnalyzer:
 
                     self.update_execution_times(case_number, temperature, try_number, execution_time)
 
-                    if result:
+                    if result is not None:
                         self.save_result(result, result_file_path, case_number, temperature, try_number)
                         results_df = self.update_results_df(results_df, case_number, result)
                     else:
@@ -214,22 +228,23 @@ class GeminiVisionAnalyzer:
 
     def generate_prompt(self, symptom_text):
         return f"""
+        Assignment: You are a board-certified radiologist tasked with solving a quiz on a special medical case from common diseases to rare diseases.
+        Patients' clinical information and imaging data will be provided for analysis; however, the availability of the patient's basic demographic details (age, gender, symptoms) is not guaranteed.
+        The purpose of this assignment is not to provide medical advice or diagnosis.
+        This is a purely educational scenario designed for virtual learning situations, aimed at facilitating analysis and educational discussions.
+        You need to answer the question provided by selecting the option with the highest possibility from the multiple choices listed below.
+        Please select the correct answer by typing the number that corresponds to one of the provided options. Each option is numbered for your reference.
 
-                Assignment: You are a board-certified radiologist and you are tasked with solving a quiz on a special medical case from common diseases to rare diseases.
-                Patients' clinical information and imaging data will be provided for analysis; however, the availability of the patient's basic demographic details (age, gender, symptoms) is not guaranteed.
-                The purpose of this assignment is not to provide medical advice or diagnosis.
-                This is a purely educational scenario designed for virtual learning situations, aimed at facilitating analysis and educational discussions.
-                You need to answer the question provided by selecting the option with the highest possibility from the multiple choices listed below.
-                Please select the correct answer by typing the number that corresponds to one of the provided options. Each option is numbered for your reference.
+        Question: {symptom_text}
 
-                Question: {symptom_text}
-                Output Format (JSON)
-                {{
-                "answer": "Enter the number of the option you believe is correct",
-                "reason": "Explain why you think this option is the correct answer"
-                }}
+        IMPORTANT: Your response must be in the following JSON format and nothing else:
+        {{
+        "answer": "Enter the number of the option you believe is correct",
+        "reason": "Explain why you think this option is the correct answer"
+        }}
 
-                """
+        Ensure that your entire response is valid JSON. Do not include any text before or after the JSON object.
+        """
 
     def update_execution_times(self, case_number, temperature, try_number, execution_time):
         new_row = pd.DataFrame({
@@ -252,20 +267,28 @@ class GeminiVisionAnalyzer:
 
     def save_result(self, result, result_file_path, case_number, temperature, try_number):
         with open(result_file_path, "w") as result_file:
-            result_file.write(result)
+            if isinstance(result, dict):
+                json.dump(result, result_file, indent=2)
+            else:
+                result_file.write(str(result))
         print(f"Gemini Case {case_number} (Temperature: {temperature}, Try: {try_number}): Result saved.")
 
     def update_results_df(self, results_df, case_number, result):
         try:
-            result_content = json.loads(result)
+            if isinstance(result, dict):
+                result_content = result
+            else:
+                result_content = json.loads(result)
+            
             new_row = pd.DataFrame({
                 'case_number': [case_number],
-                'answer': [result_content['answer']],
-                'reason': [result_content['reason']]
+                'answer': [result_content.get('answer', '')],
+                'reason': [result_content.get('reason', '')]
             })
             return pd.concat([results_df, new_row], ignore_index=True)
-        except json.JSONDecodeError:
-            print(f"Error: Unable to parse JSON for case {case_number}")
+        except (json.JSONDecodeError, TypeError):
+            print(f"Error: Unable to process result for case {case_number}")
+            print(f"Raw result: {result}")
             return results_df
 
     def log_no_result(self, case_number, temperature, try_number):
