@@ -119,14 +119,6 @@ To combine results into an Excel file:
 python 1_SolvingQuiz_Task/1.4.excel_combined_sum.py
 ```
 
-## Contributing
-
-1. Fork the repository.
-2. Create your feature branch (`git checkout -b feature/fooBar`).
-3. Commit your changes (`git commit -am 'Add some fooBar'`).
-4. Push to the branch (`git push origin feature/fooBar`).
-5. Create a new Pull Request.
-
 ## License
 
 Distributed under the MIT License. See `LICENSE` for more information.
